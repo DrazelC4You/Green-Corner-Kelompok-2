@@ -429,173 +429,24 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     /* =========================
-       UPLOAD FOTO
-       (klik kotak foto untuk pilih gambar
-        dari perangkat, disimpan di localStorage
-        browser ini — dikompres dulu biar hemat)
+       FOTO TANAMAN/DOKUMENTASI
+       (foto statis dari folder assets/ saja —
+        bukan upload interaktif, jadi cuma bisa
+        diganti lewat file, bukan oleh pengunjung)
     ========================= */
 
-    const photoSlots = document.querySelectorAll(".photo-upload-slot");
+    document.querySelectorAll(".photo-upload-slot").forEach(slot => {
+        const defaultSrc = slot.getAttribute("data-photo-default");
+        if (!defaultSrc) return; // belum ada foto asli, biarkan ikon placeholder
 
-    if (photoSlots.length) {
+        const img = document.createElement("img");
+        img.className = "photo-upload-img";
+        img.alt = slot.getAttribute("data-photo-label") || "Foto Green Corner";
+        img.src = defaultSrc;
+        slot.appendChild(img);
+        slot.classList.add("has-photo");
+    });
 
-        const PHOTO_PREFIX = "greencorner-photo-";
-        const MAX_DIMENSION = 900;
-        const JPEG_QUALITY = 0.72;
-
-        const compressImage = (file) => new Promise((resolve, reject) => {
-            const reader = new FileReader();
-
-            reader.onerror = () => reject(new Error("Gagal membaca file"));
-
-            reader.onload = () => {
-                const img = new Image();
-
-                img.onerror = () => reject(new Error("File bukan gambar yang valid"));
-
-                img.onload = () => {
-                    let width = img.width;
-                    let height = img.height;
-
-                    if (width > height && width > MAX_DIMENSION) {
-                        height = Math.round(height * (MAX_DIMENSION / width));
-                        width = MAX_DIMENSION;
-                    } else if (height > MAX_DIMENSION) {
-                        width = Math.round(width * (MAX_DIMENSION / height));
-                        height = MAX_DIMENSION;
-                    }
-
-                    const canvas = document.createElement("canvas");
-                    canvas.width = width;
-                    canvas.height = height;
-                    canvas.getContext("2d").drawImage(img, 0, 0, width, height);
-
-                    resolve(canvas.toDataURL("image/jpeg", JPEG_QUALITY));
-                };
-
-                img.src = reader.result;
-            };
-
-            reader.readAsDataURL(file);
-        });
-
-        const loadSavedPhoto = (id) => {
-            try {
-                return localStorage.getItem(PHOTO_PREFIX + id);
-            } catch (e) {
-                return null;
-            }
-        };
-
-        const showPhoto = (slot, dataUrl) => {
-            let img = slot.querySelector(".photo-upload-img");
-            if (!img) {
-                img = document.createElement("img");
-                img.className = "photo-upload-img";
-                img.alt = slot.getAttribute("data-photo-label") || "Foto Green Corner";
-                slot.appendChild(img);
-            }
-            img.src = dataUrl;
-            slot.classList.add("has-photo");
-        };
-
-        const setupSlot = (slot) => {
-            const id = slot.getAttribute("data-photo-id");
-            if (!id) return;
-
-            const saved = loadSavedPhoto(id);
-            const defaultSrc = slot.getAttribute("data-photo-default");
-
-            if (saved) {
-                showPhoto(slot, saved);
-            } else if (defaultSrc) {
-                // Belum ada foto upload-an sendiri di browser ini —
-                // pakai foto asli bawaan (assets/) biar semua pengunjung
-                // langsung lihat foto beneran, bukan ikon kosong.
-                showPhoto(slot, defaultSrc);
-            }
-
-            const input = document.createElement("input");
-            input.type = "file";
-            input.accept = "image/*";
-            input.className = "photo-upload-input";
-            slot.appendChild(input);
-
-            const hint = document.createElement("div");
-            hint.className = "photo-upload-hint";
-            slot.appendChild(hint);
-
-            const removeBtn = document.createElement("button");
-            removeBtn.type = "button";
-            removeBtn.className = "photo-upload-remove";
-            removeBtn.setAttribute("aria-label", "Hapus foto");
-            removeBtn.innerHTML = '<i class="fa-solid fa-trash"></i>';
-            slot.appendChild(removeBtn);
-
-            const setHintText = () => {
-                const label = slot.classList.contains("has-photo") ? "Ganti" : "Unggah";
-                hint.innerHTML =
-                    '<i class="fa-solid fa-camera"></i><span>Klik untuk ' + label + ' foto</span>';
-            };
-            setHintText();
-
-            // Slot foto di Dokumentasi ada di dalam ".gallery-image" yang
-            // sudah punya fitur lightbox (klik = perbesar foto). Supaya
-            // tidak bentrok: kalau sudah ada foto, klik kotak = perbesar
-            // (lightbox), ganti foto lewat overlay "Klik untuk Ganti foto".
-            // Kalau belum ada foto, atau di luar galeri dokumentasi,
-            // klik kotak langsung buka pilih file.
-            const inLightboxGallery = !!slot.closest(".gallery-image");
-
-            slot.addEventListener("click", (event) => {
-                if (removeBtn.contains(event.target)) return;
-                if (inLightboxGallery && slot.classList.contains("has-photo")) return;
-                input.click();
-            });
-
-            hint.addEventListener("click", (event) => {
-                event.stopPropagation();
-                input.click();
-            });
-
-            input.addEventListener("change", async () => {
-                const file = input.files && input.files[0];
-                if (!file) return;
-
-                try {
-                    const dataUrl = await compressImage(file);
-
-                    try {
-                        localStorage.setItem(PHOTO_PREFIX + id, dataUrl);
-                    } catch (e) {
-                        alert("Penyimpanan browser penuh. Hapus beberapa foto lama dulu, lalu coba lagi.");
-                        return;
-                    }
-
-                    showPhoto(slot, dataUrl);
-                    setHintText();
-
-                } catch (err) {
-                    alert("Gagal memuat gambar. Coba file lain.");
-                }
-            });
-
-            removeBtn.addEventListener("click", (event) => {
-                event.stopPropagation();
-                try {
-                    localStorage.removeItem(PHOTO_PREFIX + id);
-                } catch (e) { /* localStorage tidak tersedia, lewati saja */ }
-
-                const img = slot.querySelector(".photo-upload-img");
-                if (img) img.remove();
-
-                slot.classList.remove("has-photo");
-                setHintText();
-            });
-        };
-
-        photoSlots.forEach(setupSlot);
-    }
 
     /* =========================
        CHATBOT (rule-based, tanpa API)
@@ -610,80 +461,23 @@ document.addEventListener("DOMContentLoaded", () => {
         const chatMessages = document.getElementById("chatbot-messages");
 
         /* =========================
-           AI OPSIONAL (Gemini API)
-           Key disimpan di localStorage
-           browser ini saja, tidak pernah
-           dikirim ke server manapun selain
-           langsung ke Google.
+           AI (Gemini API)
+           Key ditanam langsung di sini —
+           aktif otomatis buat semua pengunjung,
+           tidak perlu isi apa-apa.
         ========================= */
 
-        const GEMINI_KEY_STORAGE = "greencorner-gemini-key";
+        const GEMINI_API_KEY = "AQ.Ab8RN6JOVgR5uTgdm8CaVfHEcITIrm283u-9OjmF9PU1M9lo-g";
         const GEMINI_MODEL = "gemini-3.6-flash";
 
-        const aiToggleBtn = document.getElementById("chatbot-ai-toggle");
-        const aiPanel = document.getElementById("chatbot-ai-panel");
-        const aiKeyInput = document.getElementById("chatbot-ai-key-input");
-        const aiKeySaveBtn = document.getElementById("chatbot-ai-key-save");
-        const aiKeyClearBtn = document.getElementById("chatbot-ai-key-clear");
         const chatbotNote = document.getElementById("chatbot-note");
-
-        const getGeminiKey = () => {
-            try {
-                return localStorage.getItem(GEMINI_KEY_STORAGE) || "";
-            } catch (e) {
-                return "";
-            }
-        };
-
-        const updateChatbotNote = () => {
-            if (!chatbotNote) return;
-
-            if (getGeminiKey()) {
-                chatbotNote.innerHTML =
-                    '*Mode AI aktif (Gemini). Kalau AI gagal dihubungi, otomatis kembali ke jawaban kata kunci.';
-            } else {
-                chatbotNote.innerHTML =
-                    '*Mode kata kunci sederhana, belum pakai AI. Klik ' +
-                    '<i class="fa-solid fa-wand-magic-sparkles"></i> di atas untuk aktifkan AI (opsional, gratis).';
-            }
-        };
-
-        if (aiToggleBtn && aiPanel) {
-            aiToggleBtn.addEventListener("click", () => {
-                aiPanel.hidden = !aiPanel.hidden;
-                if (!aiPanel.hidden && aiKeyInput) aiKeyInput.value = getGeminiKey();
-            });
+        if (chatbotNote) {
+            chatbotNote.textContent =
+                "*Dijawab otomatis pakai AI. Kalau AI gagal dihubungi, otomatis kembali ke jawaban kata kunci.";
         }
-
-        if (aiKeySaveBtn && aiKeyInput) {
-            aiKeySaveBtn.addEventListener("click", () => {
-                const key = aiKeyInput.value.trim();
-                if (!key) return;
-
-                try {
-                    localStorage.setItem(GEMINI_KEY_STORAGE, key);
-                } catch (e) { /* localStorage tidak tersedia, lewati saja */ }
-
-                if (aiPanel) aiPanel.hidden = true;
-                updateChatbotNote();
-            });
-        }
-
-        if (aiKeyClearBtn) {
-            aiKeyClearBtn.addEventListener("click", () => {
-                try {
-                    localStorage.removeItem(GEMINI_KEY_STORAGE);
-                } catch (e) { /* localStorage tidak tersedia, lewati saja */ }
-
-                if (aiKeyInput) aiKeyInput.value = "";
-                updateChatbotNote();
-            });
-        }
-
-        updateChatbotNote();
 
         // Panggil Gemini API langsung dari browser (CORS didukung Google).
-        // Kalau gagal (key kosong/salah, tidak ada internet, limit habis),
+        // Kalau gagal (tidak ada internet, limit habis, dll),
         // pemanggil (submit handler di bawah) otomatis pakai findAnswer().
         const askGemini = async (question, apiKey) => {
             const systemContext =
@@ -853,7 +647,7 @@ document.addEventListener("DOMContentLoaded", () => {
             chatInput.value = "";
 
             const typingMsg = appendMessage("mengetik...", "typing");
-            const apiKey = getGeminiKey();
+            const apiKey = GEMINI_API_KEY;
 
             if (apiKey) {
                 askGemini(question, apiKey)
