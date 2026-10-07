@@ -402,6 +402,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const closeBtn = overlay.querySelector(".lightbox-close");
 
         const openLightbox = (imageEl) => {
+            if (!imageEl.querySelector("img")) return; // Jangan buka modal jika belum ada foto asli
             lightboxBox.innerHTML = imageEl.innerHTML;
             overlay.classList.add("open");
             document.body.classList.add("lightbox-locked");
@@ -413,7 +414,6 @@ document.addEventListener("DOMContentLoaded", () => {
         };
 
         galleryImages.forEach(img => {
-            img.style.cursor = "zoom-in";
             img.addEventListener("click", () => openLightbox(img));
         });
 
@@ -430,9 +430,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
     /* =========================
        FOTO TANAMAN/DOKUMENTASI
-       (foto statis dari folder assets/ saja —
-        bukan upload interaktif, jadi cuma bisa
-        diganti lewat file, bukan oleh pengunjung)
+       Foto statis dari folder assets/ saja.
+       Tidak ada fitur upload dari browser sama sekali —
+       baik pengunjung maupun anggota yang login tidak
+       bisa mengganti foto lewat website. Foto hanya bisa
+       diganti dengan mengedit file di folder assets/ dan
+       atribut data-photo-default di HTML.
     ========================= */
 
     document.querySelectorAll(".photo-upload-slot").forEach(slot => {
@@ -467,7 +470,7 @@ document.addEventListener("DOMContentLoaded", () => {
            tidak perlu isi apa-apa.
         ========================= */
 
-        const GEMINI_API_KEY = "AQ.Ab8RN6JOVgR5uTgdm8CaVfHEcITIrm283u-9OjmF9PU1M9lo-g";
+        const GEMINI_API_KEY = "AQ.Ab8RN6I-XKV6o5HjPqQteEz9zGDvkzZNP2nljooQpyKI8PU_Rg";
         const GEMINI_MODEL = "gemini-3.6-flash";
 
         const chatbotNote = document.getElementById("chatbot-note");
@@ -476,9 +479,8 @@ document.addEventListener("DOMContentLoaded", () => {
                 "*Dijawab otomatis pakai AI. Kalau AI gagal dihubungi, otomatis kembali ke jawaban kata kunci.";
         }
 
-        // Panggil Gemini API langsung dari browser (CORS didukung Google).
-        // Kalau gagal (tidak ada internet, limit habis, dll),
-        // pemanggil (submit handler di bawah) otomatis pakai findAnswer().
+        // Panggil Gemini API langsung dari browser.
+        // Ditambahkan timeout 10 detik dan logging error agar mudah dilacak jika gagal.
         const askGemini = async (question, apiKey) => {
             const systemContext =
                 "Kamu adalah asisten chatbot untuk website sekolah bernama Green Corner, " +
@@ -490,148 +492,189 @@ document.addEventListener("DOMContentLoaded", () => {
                 "https://generativelanguage.googleapis.com/v1beta/models/" +
                 GEMINI_MODEL + ":generateContent";
 
-            const response = await fetch(url, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "x-goog-api-key": apiKey
-                },
-                body: JSON.stringify({
-                    contents: [{ parts: [{ text: question }] }],
-                    systemInstruction: { parts: [{ text: systemContext }] },
-                    generationConfig: {
-                        // "minimal" = mode tercepat Gemini, cocok buat
-                        // chatbot jawaban singkat kayak gini (gak perlu
-                        // mikir panjang kayak soal matematika/koding).
-                        thinkingConfig: { thinkingLevel: "minimal" }
-                    }
-                })
-            });
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-            if (!response.ok) {
-                throw new Error("Gemini request gagal: " + response.status);
+            try {
+                const response = await fetch(url, {
+                    method: "POST",
+                    signal: controller.signal,
+                    headers: {
+                        "Content-Type": "application/json",
+                        "x-goog-api-key": apiKey
+                    },
+                    body: JSON.stringify({
+                        contents: [{ parts: [{ text: question }] }],
+                        systemInstruction: { parts: [{ text: systemContext }] },
+                        generationConfig: {
+                            thinkingConfig: { thinkingLevel: "minimal" }
+                        }
+                    })
+                });
+
+                clearTimeout(timeoutId);
+
+                if (!response.ok) {
+                    const errDetail = await response.text().catch(() => "");
+                    throw new Error(`HTTP ${response.status}: ${errDetail.slice(0, 120)}`);
+                }
+
+                const data = await response.json();
+                const text = data &&
+                    data.candidates && data.candidates[0] &&
+                    data.candidates[0].content && data.candidates[0].content.parts &&
+                    data.candidates[0].content.parts[0] &&
+                    data.candidates[0].content.parts[0].text;
+
+                if (!text) throw new Error("Format respons API kosong");
+
+                return text.trim();
+            } catch (err) {
+                clearTimeout(timeoutId);
+                throw err;
             }
-
-            const data = await response.json();
-            const text = data &&
-                data.candidates && data.candidates[0] &&
-                data.candidates[0].content && data.candidates[0].content.parts &&
-                data.candidates[0].content.parts[0] &&
-                data.candidates[0].content.parts[0].text;
-
-            if (!text) throw new Error("Gemini tidak mengembalikan jawaban");
-
-            return text.trim();
         };
 
-        // Database jawaban: setiap entri punya daftar kata kunci.
-        // Skor dihitung dari jumlah kata kunci yang cocok pada
-        // pertanyaan pengguna; skor tertinggi yang dijawab.
+        // Database jawaban lokal (cadangan cerdas jika API Gemini gagal/offline)
         const chatDatabase = [
             {
-                keywords: ["apa itu green corner", "green corner itu apa", "green corner"],
-                answer: "Green Corner adalah proyek penanaman dan perawatan tanaman yang kami lakukan sebagai bagian dari kegiatan proyek kolaborasi kelompok."
+                keywords: ["apa itu green corner", "green corner itu apa", "green corner", "tentang proyek", "latar belakang"],
+                answer: "Green Corner adalah proyek penanaman dan perawatan tanaman yang kami lakukan sebagai bagian dari kegiatan proyek kolaborasi kelompok di SMK Negeri 2 Purwokerto."
             },
             {
-                keywords: ["tujuan", "manfaat proyek"],
-                answer: "Tujuan proyek ini adalah memberikan pengalaman langsung menanam dan merawat tanaman, sekaligus melatih kerja sama dan tanggung jawab anggota kelompok."
+                keywords: ["tujuan", "manfaat", "maksud proyek", "alasan proyek", "mengapa dibuat"],
+                answer: "Tujuan proyek ini adalah memberikan pengalaman langsung menanam dan merawat tanaman, sekaligus melatih kerja sama, tanggung jawab, dan kepedulian lingkungan bagi anggota kelompok."
             },
             {
-                keywords: ["tanaman apa", "jenis tanaman", "tanaman yang digunakan"],
-                answer: "Tanaman yang digunakan dalam proyek Green Corner adalah Bougainvillea dan Zinnia."
+                keywords: ["tanaman apa", "jenis tanaman", "tanaman yang digunakan", "tanaman yang ditanam", "bunga apa"],
+                answer: "Tanaman yang digunakan dalam proyek Green Corner adalah Bougainvillea (bunga kertas) dan Zinnia (kembang kertas)."
             },
             {
-                keywords: ["alat", "peralatan"],
-                answer: "Alat yang digunakan antara lain sekop kecil, gunting, ember, alat penyiram, dan alat pengaduk."
+                keywords: ["alat", "peralatan", "perlengkapan", "sekop", "gunting", "ember", "sprayer", "penyiram"],
+                answer: "Alat yang digunakan antara lain sekop kecil untuk mengolah tanah, gunting tanaman untuk pemangkasan, ember, alat penyiram (sprayer/gembor), dan pengaduk media tanam."
             },
             {
-                keywords: ["bahan"],
-                answer: "Bahan yang digunakan antara lain tanah, pupuk, bibit tanaman, dan air."
+                keywords: ["bahan", "material", "media tanam", "tanah", "kompos", "bibit"],
+                answer: "Bahan yang digunakan meliputi tanah subur, pupuk kandang/kompos, bibit tanaman Bougainvillea dan Zinnia, serta air bersih untuk penyiraman."
             },
             {
-                keywords: ["proses tanam", "cara menanam", "cara tanam", "menanamnya"],
-                answer: "Prosesnya dimulai dari menyiapkan media tanam, mengisi wadah dengan tanah, menanam bibit, menyiram, memberi pupuk, lalu melakukan pengamatan dan perawatan rutin."
+                keywords: ["proses tanam", "cara menanam", "cara tanam", "menanamnya", "langkah tanam", "tahapan tanam"],
+                answer: "Prosesnya dimulai dari persiapan wadah dan media tanam, memasukkan campuran tanah dan pupuk, menanam bibit secara hati-hati, melakukan penyiraman awal, dan perawatan rutin berkala."
             },
             {
-                keywords: ["kenapa dirawat", "mengapa dirawat", "perlu dirawat"],
-                answer: "Perawatan diperlukan agar tanaman mendapat air dan nutrisi yang cukup, serta agar kita bisa memantau kondisi dan perkembangannya."
+                keywords: ["kenapa dirawat", "mengapa dirawat", "perlu dirawat", "alasan perawatan", "tujuan perawatan"],
+                answer: "Perawatan diperlukan agar tanaman mendapat asupan air dan nutrisi yang seimbang, terlindungi dari hama/penyakit, serta terpantau pertumbuhannya hingga berbunga optimal."
             },
             {
-                keywords: ["belajar apa", "pelajaran", "yang dipelajari"],
-                answer: "Dari proyek ini kami belajar proses menanam dan merawat tanaman, serta belajar bekerja sama, bertanggung jawab, dan membagi tugas dalam kelompok."
+                keywords: ["belajar apa", "pelajaran", "yang dipelajari", "manfaat untuk siswa", "kesan"],
+                answer: "Dari proyek ini kami belajar teknik dasar agrikultur/berkebun, kedisiplinan jadwal piket perawatan, serta nilai gotong royong dan tanggung jawab bersama dalam tim."
             },
             {
-                keywords: ["berhenti setelah tanam", "selesai setelah tanam"],
-                answer: "Tidak. Setelah ditanam, tanaman tetap perlu disiram, diamati, dan dirawat secara berkala sesuai kebutuhannya."
+                keywords: ["berhenti setelah tanam", "selesai setelah tanam", "apakah selesai"],
+                answer: "Tentu tidak. Setelah tahap penanaman selesai, tanaman harus terus dirawat, disiram, disiangi dari gulma, dan dipupuk secara teratur agar tetap hidup dan subur."
             },
             {
-                keywords: ["hasil", "hasil utama", "hasil proyek"],
-                answer: "Hasil utama proyek ini adalah tanaman yang berhasil ditanam dan dirawat, serta pengalaman kerja sama tim dalam melakukan kegiatan penanaman."
+                keywords: ["hasil", "hasil utama", "hasil proyek", "evaluasi", "kesimpulan"],
+                answer: "Hasil proyek ini meliputi tanaman Bougainvillea dan Zinnia yang tumbuh sehat dan segar, peningkatan area hijau di sekolah, serta dokumentasi dan data monitoring perkembangan tanaman."
             },
             {
-                keywords: ["cara merawat bougainvillea", "merawat bougenville", "bougainvillea"],
-                answer: "Bougainvillea perlu sinar matahari yang cukup, disiram secukupnya, dipangkas bagian yang kering, dan dipupuk sesuai kebutuhan agar tumbuh optimal."
+                keywords: ["cara merawat bougainvillea", "merawat bougenville", "bougainvillea", "bougenville", "bunga kertas", "tips bougenvil"],
+                answer: "Bougainvillea membutuhkan paparan sinar matahari penuh (minimal 6 jam/hari), penyiraman secukupnya (hindari media terlalu becek), pemangkasan ranting kering, dan pemupukan berkala."
             },
             {
-                keywords: ["cara merawat zinnia", "merawat zinnia", "zinnia"],
-                answer: "Zinnia membutuhkan sinar matahari yang cukup dan penyiraman teratur sesuai kondisi media tanam agar bunganya tumbuh cerah dan sehat."
+                keywords: ["cara merawat zinnia", "merawat zinnia", "zinnia", "zinia", "kembang kertas", "tips zinnia"],
+                answer: "Zinnia menyukai sinar matahari langsung dan membutuhkan penyiraman teratur saat lapisan atas tanah mulai kering. Hindari menyiram langsung ke kelopak bunga agar tidak membusuk."
             },
             {
-                keywords: ["beda bougainvillea zinnia", "perbedaan tanaman", "bougainvillea vs zinnia", "zinnia vs bougainvillea"],
-                answer: "Bedanya, Bougainvillea adalah tanaman semak berbunga kertas yang tahan panas dan disiram secukupnya, sedangkan Zinnia adalah bunga musiman yang butuh penyiraman lebih teratur. Detail lengkapnya ada di tabel perbandingan pada halaman Tanaman."
+                keywords: ["beda bougainvillea zinnia", "perbedaan tanaman", "bougainvillea vs zinnia", "zinnia vs bougainvillea", "bedanya"],
+                answer: "Bougainvillea adalah tanaman semak berkayu menahun yang sangat tahan cuaca panas dan bunganya berupa seludang tipis, sedangkan Zinnia adalah tanaman herba musiman dengan bunga mekar cerah yang membutuhkan media tanam lebih lembap."
             },
             {
-                keywords: ["siram", "penyiraman", "jadwal siram"],
-                answer: "Penyiraman dilakukan secukupnya sesuai kondisi media tanam — jangan sampai terlalu basah atau terlalu kering. Cek status penyiraman tiap tanaman di halaman Tanaman."
+                keywords: ["siram", "penyiraman", "jadwal siram", "nyiram", "disiram", "kapan disiram", "berapa kali siram"],
+                answer: "Penyiraman dilakukan secara rutin 1–2 kali sehari (pagi atau sore hari) disesuaikan dengan kelembapan tanah. Jika cuaca hujan atau tanah masih lembap, penyiraman dapat dikurangi."
             },
             {
-                keywords: ["pupuk", "pemupukan"],
-                answer: "Pemberian pupuk dilakukan sesuai kebutuhan untuk membantu pertumbuhan tanaman, biasanya di sela masa perawatan rutin."
+                keywords: ["pupuk", "pemupukan", "kapan pupuk", "jenis pupuk", "nutrisi"],
+                answer: "Pemupukan diberikan setiap 2–3 minggu sekali menggunakan pupuk NPK seimbang atau pupuk organik kompos untuk menyuplai unsur hara bagi daun dan perangsang bunga."
             },
             {
-                keywords: ["kelompok", "anggota", "siapa saja"],
-                answer: "Proyek Green Corner ini dikerjakan oleh Kelompok 2 dari SMK Negeri 2 Purwokerto."
+                keywords: ["kelompok", "anggota", "siapa saja", "nama anggota", "pembuat", "tim", "siapa yang buat"],
+                answer: "Website dan proyek Green Corner ini dibuat dan dikelola oleh Kelompok 2 dari SMK Negeri 2 Purwokerto yang beranggotakan 6 siswa."
             },
             {
-                keywords: ["halo", "hai", "hi", "pagi", "siang", "malam"],
-                answer: "Halo juga! 👋 Silakan tanya apa saja seputar Green Corner, Bougainvillea, atau Zinnia."
+                keywords: ["smk", "sekolah", "smkn 2", "purwokerto"],
+                answer: "Proyek ini dilaksanakan di lingkungan SMK Negeri 2 Purwokerto sebagai bagian dari kegiatan pembelajaran berbasis proyek ramah lingkungan."
             },
             {
-                keywords: ["terima kasih", "makasih", "thanks"],
-                answer: "Sama-sama! Senang bisa membantu 🌱"
+                keywords: ["halo", "hai", "hi", "hey", "pagi", "siang", "sore", "malam", "assalamualaikum"],
+                answer: "Halo! 🌱 Senang bertemu denganmu. Silakan tanyakan apa saja tentang proyek Green Corner, tanaman Bougainvillea, Zinnia, atau tips perawatannya!"
+            },
+            {
+                keywords: ["terima kasih", "makasih", "thanks", "tengkyu", "matur nuwun"],
+                answer: "Sama-sama! Senang bisa membantu. Tetap semangat menjaga lingkungan hijau bersama Green Corner! 🌿"
             }
         ];
 
         const fallbackAnswer =
             "Maaf, aku belum menemukan jawaban yang cocok untuk pertanyaan itu. " +
-            "Coba tanyakan seputar tanaman, cara merawat, alat/bahan, atau proyek Green Corner ya!";
+            "Coba tanyakan seputar tanaman Bougainvillea/Zinnia, cara merawat, alat & bahan, atau proyek Green Corner ya!";
 
+        // Algoritma pencocokan cerdas dengan skor token kata & frasa
         const findAnswer = (question) => {
+            const cleanQ = question.toLowerCase()
+                .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?\"]/g, " ")
+                .replace(/\s+/g, " ")
+                .trim();
 
-            const q = question.toLowerCase();
+            const queryWords = cleanQ.split(" ").filter(w => w.length > 2);
             let bestScore = 0;
             let bestAnswer = null;
 
             chatDatabase.forEach(entry => {
                 let score = 0;
+
+                // 1. Cek frasa penuh (nilai tinggi)
                 entry.keywords.forEach(keyword => {
-                    if (q.includes(keyword)) {
-                        score += keyword.split(" ").length;
+                    const kw = keyword.toLowerCase();
+                    if (cleanQ.includes(kw)) {
+                        score += kw.split(" ").length * 5;
+                    } else {
+                        // 2. Cek kecocokan per kata (token matching)
+                        const kwWords = kw.split(" ").filter(w => w.length > 2);
+                        kwWords.forEach(kwWord => {
+                            queryWords.forEach(qWord => {
+                                if (qWord === kwWord || qWord.includes(kwWord) || kwWord.includes(qWord)) {
+                                    score += 2;
+                                }
+                            });
+                        });
                     }
                 });
+
                 if (score > bestScore) {
                     bestScore = score;
                     bestAnswer = entry.answer;
                 }
             });
 
-            return bestAnswer || fallbackAnswer;
+            return (bestScore >= 2 && bestAnswer) ? bestAnswer : fallbackAnswer;
         };
 
-        const appendMessage = (text, who) => {
+        const appendMessage = (text, who, sourceLabel) => {
             const msg = document.createElement("div");
             msg.className = "chatbot-msg " + who;
-            msg.textContent = text;
+
+            const textEl = document.createElement("span");
+            textEl.textContent = text;
+            msg.appendChild(textEl);
+
+            if (sourceLabel) {
+                const tag = document.createElement("span");
+                tag.className = "chatbot-source-tag chatbot-source-" + sourceLabel.type;
+                tag.textContent = sourceLabel.text;
+                msg.appendChild(tag);
+            }
+
             chatMessages.appendChild(msg);
             chatMessages.scrollTop = chatMessages.scrollHeight;
             return msg;
@@ -653,20 +696,29 @@ document.addEventListener("DOMContentLoaded", () => {
                 askGemini(question, apiKey)
                     .then(answer => {
                         typingMsg.remove();
-                        appendMessage(answer, "bot");
+                        appendMessage(answer, "bot", { type: "ai", text: "🤖 AI" });
                     })
-                    .catch(() => {
-                        // Gemini gagal (offline, key salah, limit habis, dll)
-                        // — diam-diam kembali ke jawaban kata kunci lokal.
+                    .catch(err => {
+                        // Jika Gemini API gagal (misal: kuota limit, CORS di HP, atau jaringan putus),
+                        // catat error ke console agar bisa diperiksa dan beralih mulus ke database lokal.
+                        console.warn("[Green Corner AI] Gagal terhubung ke Gemini API:", err);
                         typingMsg.remove();
-                        appendMessage(findAnswer(question), "bot");
+                        appendMessage(findAnswer(question), "bot", { type: "fallback", text: "📋 Kata kunci" });
                     });
             } else {
                 setTimeout(() => {
                     typingMsg.remove();
-                    appendMessage(findAnswer(question), "bot");
+                    appendMessage(findAnswer(question), "bot", { type: "fallback", text: "📋 Kata kunci" });
                 }, 550);
             }
+        });
+
+        // Quick question chips
+        document.querySelectorAll(".chip-btn").forEach(chip => {
+            chip.addEventListener("click", () => {
+                chatInput.value = chip.getAttribute("data-query") || chip.textContent;
+                chatbotForm.dispatchEvent(new Event("submit", { cancelable: true }));
+            });
         });
     }
 
@@ -680,7 +732,21 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const monitorCards = document.querySelectorAll(".monitor-card");
 
-    if (monitorCards.length && window.supabase) {
+    if (monitorCards.length) {
+
+        const applyDefaultMonitoring = () => {
+            monitorCards.forEach(card => {
+                const metaText = card.querySelector(".monitor-meta-text");
+                if (metaText && metaText.textContent.includes("Memuat")) {
+                    metaText.textContent = "Status: Terpantau rutin oleh Kelompok 2";
+                }
+            });
+        };
+
+        if (!window.supabase) {
+            applyDefaultMonitoring();
+            return;
+        }
 
         // >>> WAJIB DIISI — ambil dari dashboard Supabase:
         //     Project Settings > API > Project URL & anon public key
@@ -719,34 +785,38 @@ document.addEventListener("DOMContentLoaded", () => {
         };
 
         const loadMonitoringData = async () => {
-            const { data, error } = await sb.from("monitoring").select("*");
+            try {
+                const { data, error } = await sb.from("monitoring").select("*");
 
-            if (error) {
-                console.error("Gagal ambil data monitoring:", error.message);
-                return;
-            }
-
-            data.forEach(row => {
-                const card = document.querySelector(
-                    '.monitor-card[data-plant="' + String(row.nama_tanaman).toLowerCase() + '"]'
-                );
-                if (!card) return;
-
-                const statusSelect = card.querySelector(".monitor-status-select");
-                const wateredCheckbox = card.querySelector(".monitor-watered-checkbox");
-                const noteText = card.querySelector(".monitor-note-text");
-                const metaText = card.querySelector(".monitor-meta-text");
-
-                if (statusSelect) statusSelect.value = row.kondisi || "Baik";
-                if (wateredCheckbox) wateredCheckbox.checked = !!row.disiram_hari_ini;
-                if (noteText) noteText.value = row.catatan || "";
-
-                if (metaText) {
-                    metaText.textContent =
-                        "Terakhir diupdate: " + formatWaktu(row.diupdate_pada) +
-                        (row.diupdate_oleh ? " oleh " + row.diupdate_oleh : "");
+                if (error || !data || !data.length) {
+                    throw new Error(error ? error.message : "Data belum tersedia");
                 }
-            });
+
+                data.forEach(row => {
+                    const card = document.querySelector(
+                        '.monitor-card[data-plant="' + String(row.nama_tanaman).toLowerCase() + '"]'
+                    );
+                    if (!card) return;
+
+                    const statusSelect = card.querySelector(".monitor-status-select");
+                    const wateredCheckbox = card.querySelector(".monitor-watered-checkbox");
+                    const noteText = card.querySelector(".monitor-note-text");
+                    const metaText = card.querySelector(".monitor-meta-text");
+
+                    if (statusSelect) statusSelect.value = row.kondisi || "Baik";
+                    if (wateredCheckbox) wateredCheckbox.checked = !!row.disiram_hari_ini;
+                    if (noteText) noteText.value = row.catatan || "";
+
+                    if (metaText) {
+                        metaText.textContent =
+                            "Terakhir diupdate: " + formatWaktu(row.diupdate_pada) +
+                            (row.diupdate_oleh ? " oleh " + row.diupdate_oleh : "");
+                    }
+                });
+            } catch (err) {
+                console.warn("[Monitoring] Menggunakan status default lokal:", err.message);
+                applyDefaultMonitoring();
+            }
         };
 
         const saveMonitoringRow = async (plantLabel, updates) => {
