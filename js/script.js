@@ -470,7 +470,7 @@ document.addEventListener("DOMContentLoaded", () => {
            tidak perlu isi apa-apa.
         ========================= */
 
-        const GEMINI_API_KEY = "AQ.Ab8RN6I-XKV6o5HjPqQteEz9zGDvkzZNP2nljooQpyKI8PU_Rg";
+        const GEMINI_API_KEY = "AQ.Ab8RN6L8R3mkQHC3C41MzgS8WBfAUB_SpV4kpRoMXnoVuqNntg";
         const GEMINI_MODEL = "gemini-3.6-flash";
 
         const chatbotNote = document.getElementById("chatbot-note");
